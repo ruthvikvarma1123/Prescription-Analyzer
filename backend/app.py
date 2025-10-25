@@ -74,8 +74,15 @@ def analyze_prescription():
         image_bytes = original_file.read()
         img = Image.open(io.BytesIO(image_bytes))
 
-        model = genai.GenerativeModel(model_name="gemini-2.5-flash")
+        # --- Initialize model ---
+        model = genai.GenerativeModel(
+            model_name="gemini-2.5-flash",
+             generation_config=genai.GenerationConfig(
+                response_mime_type="application/json"
+            )
+        )
 
+        # --- UPDATED PROMPT: Asks for estimate based on internal knowledge ---
         prompt = (
             f"Analyze this prescription image and extract the details in a strict JSON format. "
             f"Do not add any text or markdown like ```json outside of the JSON object. "
@@ -84,24 +91,41 @@ def analyze_prescription():
             f'"prescription_info": {{ "doctor_name": "", "doctor_reg_no": "", "doctor_contact": "", "patient_name": "", "patient_age": "", "patient_gender": "", "date": "" }},'
             f'"medications": [{{"tablet_name": "","instructions": {{ "dosage": "", "frequency": "", "duration": "", "timing": "" }},'
             f'"source_details": {{ "dosage": "", "frequency": "", "duration": "", "timing": "" }},'
-            f'"confidence_details": {{ "tablet_name": "", "dosage": "", "frequency": "", "duration": "", "timing": "" }}}}]}} '
+            f'"confidence_details": {{ "tablet_name": "", "dosage": "", "frequency": "", "duration": "", "timing": "" }},'
+            f'"estimated_price_range_inr": ""}}]}} ' # Added estimated_price_range_inr
             f"INSTRUCTIONS: For all fields, extract the value from the image. If a value is not present, use 'N/A'. "
             f"DO NOT invent personal information. For medication details (dosage, frequency, etc.), if a value is MISSING, "
             f"suggest a standard clinical value and set its 'source_details' to 'AI Suggested'. Otherwise, set it to 'Prescription'. "
-            f"Provide a 'confidence_details' percentage for extracted data, or 'N/A' for AI-suggested data."
+            f"Provide a 'confidence_details' percentage for extracted data, or 'N/A' for AI-suggested data. "
+            # Updated price instruction:
+            f"Based on your general knowledge, provide a very **rough estimated price range in INR** (e.g., '₹50-₹80 per strip') for each medication typically found in India, and put it in the 'estimated_price_range_inr' field. Do not use external search tools. If you don't have price information based on your training data, use 'N/A'."
         )
 
+        # --- API CALL: Tools parameter REMOVED ---
         response = model.generate_content([prompt, img])
-        
+
         cleaned_text = re.sub(r'```json\s*(.*?)\s*```', r'\1', response.text, flags=re.DOTALL)
         json_start_index = cleaned_text.find('{')
         if json_start_index != -1:
             cleaned_text = cleaned_text[json_start_index:]
 
+        # --- DEBUG Prints ---
+        print("\n--- Raw Gemini Response ---")
+        print(response.text)
+        print("---------------------------\n")
+        print("\n--- Cleaned Text for JSON Parsing ---")
+        print(cleaned_text)
+        print("-------------------------------------\n")
+
+
         parsed_json = json.loads(cleaned_text)
-        
+
         return jsonify(parsed_json)
 
+    except json.JSONDecodeError as json_err:
+        print(f"JSON Parsing Error: {json_err}")
+        print(f"Failed on text: {cleaned_text}")
+        return jsonify({"error": "Failed to parse the AI service response.", "details": str(json_err)}), 500
     except Exception as e:
         print(f"An error occurred during Gemini API call: {e}")
         print(f"Exception Type: {type(e).__name__}")
@@ -118,9 +142,9 @@ def set_reminder():
     reminder_time = data['reminder_time']
     interval_type = data['interval_type']
     duration = data['duration']
-    
+
     if not phone_number.startswith('+'):
-        phone_number = '+91' + phone_number 
+        phone_number = '+91' + phone_number
 
     try:
         hour, minute = map(int, reminder_time.split(':'))
@@ -153,6 +177,8 @@ def set_reminder():
     print(print_msg)
 
     return jsonify({"message": f"Reminder for {medication_name} scheduled successfully!"}), 200
+
+# --- REMOVED Route: /api/find-pharmacies ---
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5000)
